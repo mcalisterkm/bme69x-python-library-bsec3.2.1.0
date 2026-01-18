@@ -1,6 +1,6 @@
 # BME69X and BSEC3.2.1.0 for Python
 
-Bosch Sensortec released BSEC v3.2.1.0 in April 2025, and bme69x-python-library provides a Python 3.x wrapper for the binary library available from BoschSensortec.  This release supports multiple sensors, isolated configuration and state data. Support for TVOC data added in BSEC v3.2.1.0 requires a little more work and has not made this release. 
+Bosch Sensortec released BSEC v3.2.1.0 in April 2025, and bme69x-python-library provides a Python 3.x wrapper for the binary library available from BoschSensortec.  This release supports multiple sensors, isolated configuration and state data. Support for TVOC data has been added but is only supported in LP mode.  
 
 This Python wrapper for BSEC3 supports the BME690 sensor. The main use case for the Raspberry PI is with (1 or 2) single sensor BME690 modules, in one of two modes IAQ (Air Quality) or SEL (Selectivity - sniffing using an AI Studio model).
 
@@ -8,14 +8,14 @@ If you have a BME680 or BME688 please use the final release of BSEC2 Python wrap
 
 ### Pre-requisites
 
-The BME690 uses SPI and/or I2C which will need to be enabled on the target PI and can be enabled using raspi-config and its "Interface Options" menu.  i2c-tools (apt install i2c-tools) is a useful utility to validate the I2C port your sensor is working on (i2cdetect -y 1). This release supports changing the I2C bus used on the PI, and running multiple sensors (0x76 & 0x77 tested).
+The BME690 uses I2C which will need to be enabled on the target PI and can be enabled using raspi-config and its "Interface Options" menu.  i2c-tools (apt install i2c-tools) is a useful utility to validate the I2C port your sensor is working on (i2cdetect -y 1). This release supports changing the I2C bus used on the PI, and running multiple sensors (0x76 & 0x77 tested).
 
 The Raspbian Bookworm Lite OS requires the python3 development package to be installed. (sudo apt install python3-dev)
 
 ### How to install the extension with BSEC
 High level steps: 
 - setup a Python virtual environment
-- clone [this repo](https://TBA) to a desired location (virtual env) on your hard drive
+- clone [this repo](https://github.com/mcalisterkm/bme69x-python-library-bsec3.2.1.0) to a desired location (virtual env) on your hard drive
 - download the licensed BSEC3 library [from BOSCH](https://www.bosch-sensortec.com/software-tools/software/bme688-and-bme690-software/)<br>
 - unzip it into the *bme69x-python-library-bsec3.2.1.0* folder, next to this *README.md* file
 - open a new terminal window inside the *bme69x-python-library-bsec3.2.1.0* folder, and run the setup.py script.
