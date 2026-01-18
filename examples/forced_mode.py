@@ -13,6 +13,7 @@ import sys, os
 print('TESTING FORCED MODE WITHOUT BSEC')
 bme = BME69X(0x76,1, debug_mode=0)
 # Configure sensor to measure at 320 degC for 100 units (unit is 140ms - see API.md)
+# According to the BME690 Data Sheet p18, Forced mode reads T,P,H,G sequentially for 1 heater duration and temperature.
 print("Back from init.\n")
 bme.set_heatr_conf(cst.BME69X_FORCED_MODE, 320, 100, cst.BME69X_ENABLE)
 print('Heater config done, now getting data.\n')
