@@ -30,4 +30,8 @@ ad_config_from_path.py shows how to support command line parameters for the main
 ## Parallel_model & Parallel_mode_ulp
 parallel_mode.py uses the default temperature and duration profile used in AI Studio. The parallel part is the iphysical environment sensors (temp, Humidity, pressure) are read in parallel with the heater plate.  Serial mode runs the environmentatl sensors first before starting up the heater plate. 
 
+## test_tvoc
+test_tvoc.py shows the addition of Total VOC virtual sensor in this release of BSEC3. Note it onlw works on LP mode. 
 
+# test_*
+the are test scripts for setting the bsec configuration from the set of configs provided with BSEC3. The default config 33v_3s_4d is suitable for LP mode, but in ULP mode 33v_300s_4d or 28 days may be more appropriate. And for loading a saved state or config test_config_loading.py
