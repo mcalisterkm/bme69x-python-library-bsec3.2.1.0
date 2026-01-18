@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <inttypes.h>
+#include <math.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -61,6 +62,12 @@ extern "C"
     bsec_library_return_t bsec_read_data(struct bme69x_data *data, int64_t time_stamp, bsec_input_t *inputs, uint8_t *n_bsec_inputs, int32_t bsec_process_data, uint8_t op_mode, struct bme69x_dev *bme, int8_t temp_offset);
 
     bsec_library_return_t bsec_process_data(void *inst, bsec_input_t *bsec_inputs, uint8_t num_bsec_inputs);
+
+    void set_tvoc_equivalent_baseline(bool data);
+
+    float get_sample_rate_from_bsec();
+
+    void tvoc_equivalent_calibration();
 #endif
 
 #ifdef __cplusplus

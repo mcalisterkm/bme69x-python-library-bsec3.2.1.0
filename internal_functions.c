@@ -10,6 +10,22 @@ uint32_t time_ms;
 uint8_t n_fields;
 static int8_t rslt;
 
+#ifdef BSEC
+/* TVOC equivalent baseline tracker constants */
+#define TVOC_EQUIVALENT_ENABLE    3
+#define TVOC_EQUIVALENT_DISABLE   0
+#define TVOC_CALIBRATION_TIME_SEC (30 * 60)  /* 30 minutes in seconds */
+
+/* Global variable for baseline tracker */
+static uint8_t baseline_tracker = TVOC_EQUIVALENT_DISABLE;
+/* Global variable to track the current sample rate */
+static float current_sample_rate = 0.0f;
+/* TVOC calibration tracking variables */
+static time_t tvoc_start_time = 0;
+static bool tvoc_disable_flag = false;
+static bool tvoc_calibration_started = false;
+#endif
+
 uint16_t
 get_max(uint16_t array[], int8_t len)
 {
@@ -188,9 +204,13 @@ uint32_t pi3g_timestamp_ms()
 #ifdef BSEC
 bsec_library_return_t bsec_set_sample_rate(void *bme, float sample_rate)
 {
+    /* Store the sample rate for later use */
+    current_sample_rate = sample_rate;
+    
     uint8_t n_requested_virtual_sensors;
     n_requested_virtual_sensors = 13;
-    bsec_sensor_configuration_t requested_virtual_sensors[n_requested_virtual_sensors];
+    /* Array size must be 14 to accommodate TVOC sensor in LP mode */
+    bsec_sensor_configuration_t requested_virtual_sensors[14];
 
     bsec_sensor_configuration_t required_sensor_settings[BSEC_MAX_PHYSICAL_SENSOR];
     uint8_t n_required_sensor_settings = BSEC_MAX_PHYSICAL_SENSOR;
@@ -221,12 +241,28 @@ bsec_library_return_t bsec_set_sample_rate(void *bme, float sample_rate)
     requested_virtual_sensors[11].sample_rate = sample_rate;
     requested_virtual_sensors[12].sensor_id = BSEC_OUTPUT_GAS_PERCENTAGE;
     requested_virtual_sensors[12].sample_rate = sample_rate;
-    /** TVOC requires more support than simply adding the virtual sensors 
-    requested_virtual_sensors[13].sensor_id = BSEC_OUTPUT_TVOC_EQUIVALENT;
-    requested_virtual_sensors[13].sample_rate = sample_rate;
-    */
-
     
+    /* TVOC is only supported in LP mode */
+    /* Use tolerance for floating-point comparison */
+    float sample_rate_diff = fabs(sample_rate - BSEC_SAMPLE_RATE_LP);
+   /** printf("Sample rate: %.5f, LP rate: %.5f, diff: %.5f, test result: %s\n", 
+           sample_rate, BSEC_SAMPLE_RATE_LP, sample_rate_diff, 
+           (sample_rate_diff < 0.01f) ? "PASS (TVOC enabled)" : "FAIL (TVOC disabled)");
+           **/
+    if (sample_rate_diff < 0.01f)
+    {
+        printf("TVOC sensor enabled - adding to subscription (LP mode detected)\n"); 
+        requested_virtual_sensors[13].sensor_id = BSEC_OUTPUT_TVOC_EQUIVALENT;
+        requested_virtual_sensors[13].sample_rate = sample_rate;
+        n_requested_virtual_sensors = 14;
+    }
+    else
+    {
+        printf("TVOC sensor NOT enabled - not in LP mode\n");
+    }
+    
+    printf("Total requested virtual sensors: %d\n", n_requested_virtual_sensors);
+
     return bsec_update_subscription((void *)bme, requested_virtual_sensors, n_requested_virtual_sensors, required_sensor_settings, &n_required_sensor_settings);
 }
 
@@ -366,6 +402,15 @@ bsec_library_return_t bsec_read_data(struct bme69x_data *data, int64_t time_stam
             inputs[*n_bsec_inputs].time_stamp = time_stamp;
             (*n_bsec_inputs)++;
         }
+        /* Baseline tracker for TVOC (only in LP mode) */
+        /* Use tolerance for floating-point comparison */
+        if (fabs(current_sample_rate - BSEC_SAMPLE_RATE_LP) < 0.01f)
+        {
+            inputs[*n_bsec_inputs].sensor_id = BSEC_INPUT_DISABLE_BASELINE_TRACKER;
+            inputs[*n_bsec_inputs].signal = baseline_tracker;
+            inputs[*n_bsec_inputs].time_stamp = time_stamp;
+            (*n_bsec_inputs)++;
+        }
     }
     return BSEC_OK;
 }
@@ -398,6 +443,8 @@ bsec_library_return_t bsec_process_data(void *bme, bsec_input_t *bsec_inputs, ui
     uint8_t comp_gas_accuracy = 0;
     float gas_percentage = 0.0f;
     uint8_t gas_percentage_accuracy = 0;
+    float tvoc_equivalent = 0.0f;
+    uint8_t tvoc_equivalent_accuracy = 0;
 
     /* Check if something should be processed by BSEC */
     if (num_bsec_inputs > 0)
@@ -456,6 +503,12 @@ bsec_library_return_t bsec_process_data(void *bme, bsec_input_t *bsec_inputs, ui
                 gas_percentage = bsec_outputs[index].signal;
                 gas_percentage_accuracy = bsec_outputs[index].accuracy;
                 break;
+            case BSEC_OUTPUT_TVOC_EQUIVALENT:
+                /* TVOC equivalent is only available in LP mode */
+                printf("TVOC_EQUIVALENT %f\n", bsec_outputs[index].signal);
+                tvoc_equivalent = bsec_outputs[index].signal;
+                tvoc_equivalent_accuracy = bsec_outputs[index].accuracy; 
+                break;
             default:
                 continue;
             }
@@ -465,5 +518,86 @@ bsec_library_return_t bsec_process_data(void *bme, bsec_input_t *bsec_inputs, ui
         }
     }
     return bsec_status;
+}
+
+/**
+ * @brief Function to enable or disable the baseline for TVOC equivalent in the BSEC
+ *
+ * @param[in] data     TVOC equivalent baseline enable or disable
+ *                     TRUE  -> TVOC equivalent baseline adaption ON
+ *                     FALSE -> TVOC equivalent baseline adaption OFF
+ */
+void set_tvoc_equivalent_baseline(bool data)
+{
+    if (data)
+    {
+        baseline_tracker = TVOC_EQUIVALENT_ENABLE;
+    }
+    else
+    {
+        baseline_tracker = TVOC_EQUIVALENT_DISABLE;
+    }
+}
+
+/**
+ * @brief Function to calibrate the TVOC equivalent by enabling and disabling the baseline adaptation.
+ * Note: TVOC equivalent calibration is only possible in LP Mode.
+ * This should be called periodically (e.g., before each get_bsec_data call).
+ */
+void tvoc_equivalent_calibration()
+{
+    /* Only calibrate in LP mode */
+    float sample_rate_diff = fabs(current_sample_rate - BSEC_SAMPLE_RATE_LP);
+    /** printf("[TVOC Calibration] Sample rate: %.5f, LP rate: %.5f, diff: %.5f, test result: %s\n",  
+           current_sample_rate, BSEC_SAMPLE_RATE_LP, sample_rate_diff, 
+           (sample_rate_diff < 0.01f) ? "PASS (LP mode)" : "FAIL (not LP mode)"); **/
+    if (sample_rate_diff < 0.01f)
+    {
+        if (!tvoc_calibration_started)
+        {
+            /* First call - enable baseline adaptation */
+            set_tvoc_equivalent_baseline(true);
+            tvoc_disable_flag = true;
+            tvoc_start_time = time(NULL);
+            tvoc_calibration_started = true;
+            printf("[TVOC] Calibration started at %ld - baseline adaptation enabled for 30 minutes\n", 
+                   (long)tvoc_start_time);
+        }
+        else if (tvoc_disable_flag)
+        {
+            /* Check if 30 minutes have elapsed */
+            time_t current_time = time(NULL);
+            time_t elapsed_sec = current_time - tvoc_start_time;
+            
+            if (elapsed_sec >= TVOC_CALIBRATION_TIME_SEC)
+            {
+                /* After 30 minutes - disable baseline adaptation */
+                set_tvoc_equivalent_baseline(false);
+                tvoc_disable_flag = false;
+                printf("[TVOC] Calibration complete at %ld - baseline adaptation disabled after %ld seconds\n",
+                       (long)current_time, (long)elapsed_sec);
+            }
+            /** else
+            {
+                printf("[TVOC] Calibration in progress - elapsed: %ld/%d seconds\n", 
+                       (long)elapsed_sec, TVOC_CALIBRATION_TIME_SEC);
+            } **/
+        }
+    }
+    else if (tvoc_calibration_started)
+    {
+        printf("[TVOC] Calibration not supported in current BSEC mode (not LP)\n");
+        tvoc_calibration_started = false;
+    }
+}
+
+/**
+ * @brief Function to get the sample rate
+ *
+ * @return     Return the sample rate value
+ */
+float get_sample_rate_from_bsec()
+{
+    return current_sample_rate;
 }
 #endif

@@ -102,14 +102,26 @@ The list below shows the primary public methods exposed on the `BME69X` instance
   - The function will set the instance's internal `op_mode` to the provided `operation_mode` (it is the 4th argument).
   - Returns `0` on success, non-zero on failure.
 
+- `set_conf(os_hum: int, os_pres: int, os_temp: int, filter: int, odr: int)` -> int
+  - Configure sensor oversampling and filter settings.
+  - Parameters (all uint8):
+    - `os_hum`: humidity oversampling (e.g., `cnst.BME69X_OS_1X`, `cnst.BME69X_OS_2X`, `cnst.BME69X_OS_4X`, `cnst.BME69X_OS_8X`, `cnst.BME69X_OS_16X`)
+    - `os_pres`: pressure oversampling (same constants as above)
+    - `os_temp`: temperature oversampling (same constants as above)
+    - `filter`: filter coefficient (On or Off, BME69X_FILTER_OFF = 0)
+    - `odr`: output data rate setting (see ODR / STANDBY TIME MACROS in bme69xConstants.py)
+  - Returns `0` on success, non-zero on failure.
+  - Example: `sensor.set_conf(cnst.BME69X_OS_4X, cnst.BME69X_OS_2X, cnst.BME69X_OS_8X, 1, 0)`
+    See Filter section of bme69xConstants.py
+
 - `set_sample_rate(rate: float)`
   - Sets the sampling rate for virtual sensors via BSEC. Use constants in `bsecConstants`.
   - Examples: `bsec.BSEC_SAMPLE_RATE_ULP`, `bsec.BSEC_SAMPLE_RATE_LP`, `bsec.BSEC_SAMPLE_RATE_CONT`.
 
 ### Data retrieval
 
-- `get_data()` -> (BME690_API measurement)
-  - Read physical sensor outputs (temperature, pressure, humidity, gas resistance). Useful for raw data reads.
+- `get_data()` -> (raw measurement)
+  - Read physical sensor outputs (temperature, pressure, humidity, gas resistance). Useful for forced-mode raw reads.
   - Returns: sample number, timestamp (ms), temperature (°C), pressure (Pa), humidity (%rH), gas resistance (kΩ), status.
 
 - `get_bsec_data()` -> dict | None
@@ -133,6 +145,8 @@ Example `get_bsec_data()` return snippet (keys you can expect):
   'static_iaq': 48.5,
   'co2_equivalent': 420.0,
   'breath_voc_equivalent': 0.5,
+  'tvoc_equivalent': 325.0,
+  'tvoc_equivalent_accuracy': 2,
   'comp_gas_value': -0.123
 }
 ```
@@ -144,6 +158,11 @@ To support per-sensor calibration and persistent state, the library exposes help
 - `load_bsec_conf()`
   - Loads the BSEC configuration from `conf/bsec_config_{sensor_id}.txt` into the BSEC instance.
 
+- `load_bsec_conf_from_file(path: str)`
+  - Loads a BSEC configuration directly from an arbitrary file path.
+  - Automatically detects and strips the 4‑byte header present in binary `.config` exports and passes the correct 2005‑byte blob to `bsec_set_configuration`.
+  - Useful for Bosch AI Studio `.config` files without copying them into `./conf/`.
+
 - `save_bsec_conf()`
   - Retrieves the current BSEC config and writes to `conf/bsec_config_{sensor_id}.txt`.
 
@@ -152,6 +171,8 @@ To support per-sensor calibration and persistent state, the library exposes help
 
 - `save_bsec_state()`
   - Retrieves BSEC state and writes it to `conf/state_data_{sensor_id}.txt`.
+
+Current behavior: state load/save uses the `./conf` directory with sensor-specific filenames. Path-based state load/save may be added later; for now, restore via the provided helpers or parse text arrays yourself.
 
 Helper accessors:
 
@@ -163,7 +184,10 @@ Helper accessors:
 Notes:
 
 - `get_bsec_state()` commonly returns an array of ~197 integers for BSEC v3 state; config arrays can be much larger (e.g., ~2277 ints) depending on the AI Studio export.
-- the exported .config, .c and .h, files have the same data (it's packed bytes in the .config not readily readable), and it is possible to copy the array of integers from the .c file into a python array of ints.  When writing the array to disk in Python you may end up with a textual list; use the parsing snippet in `Documentation.md` or the example below to read/restore it.
+- When writing the array to disk in Python you may end up with a textual list; use the parsing snippet in `Documentation.md` or the example below to read/restore it.
+
+Recommended order of operations:
+- Create sensor → load config (`load_bsec_conf` or `load_bsec_conf_from_file`) → optionally load state → set sample rate → then read data. Avoid overriding heater profiles if the AI Studio `.config` embeds them.
 
 Parsing example (restore from text file):
 
@@ -190,11 +214,9 @@ sensor.set_bsec_state(ints)
 
 ---
 
-As the Raspberry PI uses a standard Linux system running two or more sensors with BSEC2 meant running seperate .py programs (simple solution) With BSEC3 and supporting multiple sensors it is now possible to run one AI scan to broadly classify a sample and then based on that result load a second sensor with a more specific model to identify within the general class. For example the broad classification model on the first snesor may include 'fruit', and using that result a specific fruit model could be loaded on the second sensor to look at freshness. This can all be done in one python application.
-
 ## Constants and recommended values
 
-- Heater durations: unit = 140 ms per unit for the `duration_profile` lists. So a heater profile of 5,5,10 totals 20 units multiplied by 140ms gives 2.8sec
+- Heater durations: unit = 140 ms per unit in the `duration_profile` lists.
 - Sample rate constants: see `bsecConstants.py` for available options. Typical values:
   - `BSEC_SAMPLE_RATE_ULP` — very low power (period ~300s)
   - `BSEC_SAMPLE_RATE_LP`  — low power (period ~3s)
@@ -202,8 +224,9 @@ As the Raspberry PI uses a standard Linux system running two or more sensors wit
 
 Recommended tuning tips:
 
-- The effective cycle time depends on the heater profile sum (units × 140 ms) plus BSEC processing latency. For typical heater profiles you may need to sleep multiple seconds between polling. Become familiar with Duty Cycle and Heater Profiles in AI Studio.
-- If `get_bsec_data()` returns `None` frequently, increase sleep to align with the heater cycle time. e.g. ULP is 300 sec +- a small window. A sleep of 298sec works well.
+- The effective cycle time depends on the heater profile sum (units × 140 ms) plus BSEC processing latency. For typical heater profiles you may need to sleep multiple seconds between polling.
+- If `get_bsec_data()` returns `None` frequently, increase sleep/duty cycle, or use a heater profile that produces longer measurement intervals.
+
 ---
 
 ## Examples
@@ -219,12 +242,10 @@ import bsecConstants as bsec
 
 sensor = BME69X(0x76, sensor_name='sensor_76')
 sensor.load_bsec_state()
-# FORCED_MODE: scalar temperature 320 C and duration 5 x 140ms = 700ms cycle
+# FORCED_MODE: scalar temperature and duration
 sensor.set_heatr_conf(cnst.BME69X_ENABLE, 320, 5, cnst.BME69X_FORCED_MODE)
 sensor.set_sample_rate(bsec.BSEC_SAMPLE_RATE_LP)
-# sleep for 1 cycle
-sleep(0.7)
-# This is what starts the heater cycle
+sleep(1)
 print(sensor.get_bsec_data())
 ```
 
@@ -242,7 +263,7 @@ sensor.load_bsec_conf()
 sensor.load_bsec_state()
 temp_prof=[320,100]
 dur_prof=[5,2]
-sensor.set_heatr_conf(cnst.BME69X_ENABLE, temp_prof, dur_prof, cnst.BME69X_PARALLEL_MODE)
+sensor.set_heatr_conf(cnst.BME69X_ENABLE, temp_prof, dur_prof cnst.BME69X_PARALLEL_MODE)
 sensor.set_sample_rate(bsec.BSEC_SAMPLE_RATE_LP)
 
 sleep(2)
@@ -260,8 +281,10 @@ Schedule with cron/systemd for independent duty cycles per sensor.
 ## Notes & troubleshooting
 
 - If you get a bus error or SIGBUS: ensure your extension was built for the correct architecture and BSEC binary is the right variant. The wrapper allocates a separate heap-based BSEC instance to avoid function pointer corruption.
-- If `get_bsec_data()` often returns `None` or you see -16 (timing error) returned from functions, the typical causes are:
+- If `get_bsec_data()` often returns `None`, the typical causes are:
   - Polling faster than the device/BSEC can produce processed output
-  - Heater profile with a long duty cycle and BSEC sample rate mismatches
+  - Heater profile produces a long duty cycle and BSEC sample rate mismatches
   - Incorrect sample-rate subscription for BSEC virtual sensors
+- Log files: examples write config/state into `conf/` with sensor-specific filenames.
 
+If you want, I can also generate a `sensor1_collector.py` and `sensor2_collector.py` templates and a `systemd` timer and/or crontab snippet.
