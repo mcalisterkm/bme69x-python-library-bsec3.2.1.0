@@ -1,5 +1,7 @@
 # BME69X and BSEC3.2.1.0 for Python
 
+***** YOU SHOULD PROBABLY BE USING bme69x-python-library-bsec3.3.0.0 ******
+
 Bosch Sensortec released BSEC v3.2.1.0 in April 2025, and bme69x-python-library provides a Python 3.x wrapper for the binary library available from BoschSensortec.  This release supports multiple sensors, isolated configuration and state data. Support for TVOC data has been added but is only supported in LP mode.  
 
 This Python wrapper for BSEC3 supports the BME690 sensor. The main use case for the Raspberry PI is with (1 or 2) single sensor BME690 modules, in one of two modes IAQ (Air Quality) or SEL (Selectivity - sniffing using an AI Studio model).
